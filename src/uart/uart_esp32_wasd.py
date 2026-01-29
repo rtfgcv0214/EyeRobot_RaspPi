@@ -1,5 +1,5 @@
 import curses 
-from uart_handler import UARTHandler
+from uart.uart_handler import UARTHandler
 import threading
 import time
 

@@ -1,3 +1,6 @@
-
+# python cache files
 __pycache__/
 *.pyc
+
+# vscode ssh tmp file
+.lgd-nfy0
