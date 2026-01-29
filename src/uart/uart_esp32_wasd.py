@@ -1,152 +1,191 @@
-import pigpio
+import curses 
+from uart_handler import UARTHandler
 import threading
 import time
-import curses
 
+
+# UART pins
 TX = 23
 RX = 24
 BAUDRATE = 57600
 
-ANGLE_STEP = 0.05   # rad per key press
-SEND_INTERVAL = 0.05  # seconds
+MOVEMENT_STEP = 0.02
+DRAW_INTERVAL = 0.1
 
 running = True
-output_lines = []
 
-motor1_angle = 0.0
-motor2_angle = 0.0
-key_state = set()
+esp32_history = []
+cmd_history = []
 
+key = None
+azimuth = 0.0
+elevation = 0.0
 
-def init_uart():
-    pi = pigpio.pi()
-    pi.bb_serial_read_open(RX, BAUDRATE)
-    pi.set_mode(TX, pigpio.OUTPUT)
-    return pi
+left_win = None
+right_win = None
 
 
-def bb_write(pi, data: bytes):
-    pi.wave_add_serial(TX, BAUDRATE, data)
-    wid = pi.wave_create()
-    pi.wave_send_once(wid)
-
-    while pi.wave_tx_busy():
-        time.sleep(0.001)
-
-    pi.wave_delete(wid)
-
-
-def receive_data(pi):
-    global output_lines
-    buffer = ""
-
-    while running:
-        count, data = pi.bb_serial_read(RX)
-        if count == 0:
-            time.sleep(0.01)
-            continue
-
-        chunk = data.decode("utf-8", errors="ignore").replace("\x00", "")
-        buffer += chunk
-
-        while "\n" in buffer:
-            line, buffer = buffer.split("\n", 1)
-            line = line.strip()
-            if line:
-                output_lines.append(line)
-                output_lines = output_lines[-100:]
-
-
-def draw(win):
-    win.clear()
-    h, w = win.getmaxyx()
-    win.box()
-
-    # output
-    for i, line in enumerate(output_lines[-(h - 3):]):
-        win.addstr(i + 1, 1, line[: w - 2])
-
-    status = f"M1: {motor1_angle:.2f} rad | M2: {motor2_angle:.2f} rad | WASD move | q quit"
-    win.addstr(h - 2, 1, status[: w - 2])
-    win.refresh()
-
-
-def control_loop(pi):
-    global motor1_angle, motor2_angle
-
-    while running:
-        updated1 = False
-        updated2 = False
-
-        if 'w' in key_state:
-            motor2_angle += ANGLE_STEP
-            updated2 = True
-        if 's' in key_state:
-            motor2_angle -= ANGLE_STEP
-            updated2 = True
-        if 'a' in key_state:
-            motor1_angle -= ANGLE_STEP
-            updated1 = True
-        if 'd' in key_state:
-            motor1_angle += ANGLE_STEP
-            updated1 = True
-
-        if updated1:
-            cmd = f"1a{motor1_angle:.3f}\n"
-            bb_write(pi, cmd.encode())
-        
-        if updated2:
-            cmd = f"2a{motor2_angle:.3f}\n"
-            bb_write(pi, cmd.encode())
-
-        time.sleep(SEND_INTERVAL)
-
-
-def main(stdscr):
-    global running
+def init_ui(stdscr: curses.window):
+    global left_win, right_win
 
     curses.curs_set(0)
     stdscr.nodelay(True)
-    stdscr.keypad(True)
 
-    pi = init_uart()
+    height, width = stdscr.getmaxyx()
+    mid = width // 2
 
-    t_rx = threading.Thread(target=receive_data, args=(pi,), daemon=True)
-    t_rx.start()
+    left_win = curses.newwin(height, mid, 0, 0)
+    right_win = curses.newwin(height, mid, 0, mid)
 
-    t_ctrl = threading.Thread(target=control_loop, args=(pi,), daemon=True)
-    t_ctrl.start()
+    # Right window checks keyboard with no blockings
+    right_win.timeout(10)
+    right_win.keypad(True)
 
-    bb_write(pi, b"hi\n")
+
+def draw():
+    """
+    Draws left and right windows with current status.
+    1. Left window shows instructions, command history, 
+        current azimuth/elevation, and last key pressed.
+    2. Right window shows ESP32 response history.
+    """
+    global left_win, right_win
+    global esp32_history, cmd_history
+    global key, azimuth, elevation
+
+    left_win.clear()
+    h, w = left_win.getmaxyx()
+    left_win.box()
+
+    instructions = [
+        "W/S: Increase/Decrease Elevation",
+        "A/D: Decrease/Increase Azimuth",
+        "Z: Zero Azimuth/Elevation",
+        "Space: Enable/Disable Motors",
+        "Q: Quit",
+    ]
+    
+    i = 0
+    for line in instructions:
+        left_win.addstr(i + 1, 1, line[: w - 2])
+        i += 1
+
+    rem = h - 2 - i
+    for line in cmd_history[-rem:]:
+        left_win.addstr(i + 1, 1, line[: w - 2])
+        i += 1
+    
+    if not key:
+        key = "No key pressed"
+
+    left_win.addstr(h - 3, 1, f"Azimuth: {azimuth:.2f} Elevation: {elevation:.2f}")
+    left_win.addstr(h - 2, 1, "Key: " + key)
+    left_win.refresh()
+
+    right_win.clear()
+    h, w = right_win.getmaxyx()
+    right_win.box()
+
+    for i, line in enumerate(esp32_history[-(h - 2):]):
+        right_win.addstr(i + 1, 1, line[: w - 2])
+
+    right_win.addstr(0, 2, "en ang1 | ang1 | vel1 | en ang2 | ang2 | vel2")
+    right_win.refresh()
+
+
+def receive_data(uart: UARTHandler):
+    global running
+    global esp32_history
+    buffer = ""
+    
+    while running:
+        chunk = uart.read(timeout=0.05)
+        
+        if not chunk:
+            continue
+
+        buffer += chunk
+        
+        while '\n' in buffer:
+            line, buffer = buffer.split('\n', 1)
+            line = line.strip()
+            if line:
+                esp32_history.append(line)
+
+
+def command(uart: UARTHandler):
+    global running
+    global cmd_history, right_win
+    global azimuth, elevation
+
+    motor_enabled = False
+    last_draw = time.time()
 
     while running:
-        draw(stdscr)
+        ch = right_win.getch()
+        pressed_key = None
+        cmd = None
 
-        try:
-            ch = stdscr.getch()
-        except:
-            ch = -1
+        if ch != -1:
+            pressed_key = curses.keyname(ch).decode("utf-8")
 
-        if ch == -1:
-            time.sleep(0.01)
-            continue
+        if pressed_key == 'w':
+            elevation += MOVEMENT_STEP
+            cmd = "1a" + f"{elevation:.2f}"
+        elif pressed_key == 's':
+            elevation -= MOVEMENT_STEP
+            cmd = "1a" + f"{elevation:.2f}"
+        elif pressed_key == 'a':
+            azimuth -= MOVEMENT_STEP
+            cmd = "2a" + f"{elevation:.2f}"
+        elif pressed_key == 'd':
+            azimuth += MOVEMENT_STEP
+            cmd = "2a" + f"{elevation:.2f}"
 
-        if ch == ord('q'):
+        elif pressed_key == 'z':
+            azimuth = 0.0
+            elevation = 0.0
+            cmd = "zero"
+
+        elif pressed_key == ' ':
+            motor_enabled = not motor_enabled
+            if motor_enabled:
+                cmd = "enable"
+            else:
+                cmd = "disable"
+
+        elif pressed_key == 'q':
             running = False
-            break
 
-        if chr(ch) in ['w', 'a', 's', 'd']:
-            key_state.add(chr(ch))
+        if not cmd is None:
+            cmd_history.append(cmd)
+            uart.println(cmd)
 
-        if ch == curses.KEY_RESIZE:
-            continue
+        if time.time() - last_draw >= DRAW_INTERVAL:
+            last_draw = time.time()
+            draw()
 
-        # key release detection (best-effort)
-        if ch == -1:
-            key_state.clear()
+    running = False
 
-    pi.bb_serial_read_close(RX)
-    pi.stop()
+
+def main(stdscr):
+    try:
+        uart = UARTHandler(TX, RX, BAUDRATE)
+    except Exception as e:
+        print("UART init failed:", e)
+        return
+
+    init_ui(stdscr)
+
+    # Start receiving thread
+    t = threading.Thread(target=receive_data, args=(uart,))
+    t.daemon = True
+    t.start()
+    
+    time.sleep(1)
+    uart.println("hi")
+
+    command(uart)
 
 
 if __name__ == "__main__":
