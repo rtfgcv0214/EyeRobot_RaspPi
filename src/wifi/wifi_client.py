@@ -1,87 +1,188 @@
 import socket
 import threading
-from uart.uart_handler import UARTHandler
+import curses
+import time
 
-HOST = "0.0.0.0"   # 모든 인터페이스
-PORT = 9000
+import socket_utils
+
+
+HOST_LIST = ["172.20.10.6", "10.207.112.234"]   # Raspberry Pi IP
+PORT = 8000
+
+MOVEMENT_STEP = 0.02
+DRAW_INTERVAL = 0.1
 
 running = True
+
 esp32_history = []
+cmd_history = []
 
-def receive_data(uart: UARTHandler):
-    global running
-    buffer = ""
+key = None
+azimuth = 0.0
+elevation = 0.0
 
-    while running:
-        chunk = uart.read(timeout=0.05)
-        if not chunk:
-            continue
-
-        buffer += chunk
-
-        while '\n' in buffer:
-            line, buffer = buffer.split('\n', 1)
-            line = line.strip()
-            if line:
-                esp32_history.append(line)
-                print(f"[ESP32] {line}")
+left_win: curses.window | None = None
+right_win: curses.window | None = None
 
 
-def handle_client(conn, addr, uart: UARTHandler):
-    print(f"[PC connected] {addr}")
-    try:
-        with conn:
-            buffer = ""
-            while running:
-                data = conn.recv(1024)
-                if not data:
-                    break
+def init_ui(stdscr: curses.window):
+    global left_win, right_win
 
-                buffer += data.decode()
+    curses.curs_set(0)
+    stdscr.nodelay(True)
 
-                while '\n' in buffer:
-                    cmd, buffer = buffer.split('\n', 1)
-                    cmd = cmd.strip()
-                    if cmd:
-                        print(f"[PC] {cmd}")
-                        uart.println(cmd)
+    height, width = stdscr.getmaxyx()
+    mid = width // 2
 
-    except Exception as e:
-        print("Client error:", e)
+    left_win = curses.newwin(height, mid, 0, 0)
+    right_win = curses.newwin(height, width - mid, 0, mid)
 
-    print(f"[PC disconnected] {addr}")
+    right_win.timeout(10)
+    right_win.keypad(True)
 
 
-def main():
-    try:
-        uart = UARTHandler(tx=23, rx=24, baud=57600)
-    except Exception as e:
-        print("UART init failed:", e)
+def draw():
+    global left_win, right_win
+    global esp32_history, cmd_history
+    global key, azimuth, elevation
+
+    if left_win is None or right_win is None:
         return
 
-    # UART reciever thread
+    left_win.clear()
+    h, w = left_win.getmaxyx()
+    left_win.box()
+
+    instructions = [
+        "W/S: Increase/Decrease Elevation",
+        "A/D: Decrease/Increase Azimuth",
+        "Z: Zero Azimuth/Elevation",
+        "Space: Enable/Disable Motors",
+        "Q: Quit",
+    ]
+
+    i = 0
+    for line in instructions:
+        left_win.addstr(i + 1, 1, line[: w - 2])
+        i += 1
+
+    rem = h - 6 - i
+    for line in cmd_history[-rem:]:
+        left_win.addstr(i + 1, 1, line[: w - 2])
+        i += 1
+
+    left_win.addstr(h - 3, 1, f"Azimuth: {azimuth:.2f} Elevation: {elevation:.2f}")
+    left_win.addstr(h - 2, 1, "Key: " + (key or "None"))
+    left_win.refresh()
+
+    right_win.clear()
+    h, w = right_win.getmaxyx()
+    right_win.box()
+
+    for i, line in enumerate(esp32_history[-(h - 2):]):
+        right_win.addstr(i + 1, 1, line[: w - 2])
+
+    right_win.addstr(0, 2, "ESP32 STATUS")
+    right_win.refresh()
+
+
+def receive_data(conn: socket.socket):
+    global running, esp32_history
+
+    def on_receive(line: str):
+        esp32_history.append(line)
+
+    socket_utils.listen(
+        conn,
+        on_receive,
+        is_running=lambda: running
+    )
+
+
+def command_loop(conn: socket.socket):
+    global running, key
+    global azimuth, elevation
+    global right_win
+
+    if not right_win:
+        return
+
+    motor_enabled = False
+    last_draw = time.time()
+
+    while running:
+        ch = right_win.getch()
+        cmd = None
+
+        if ch != -1:
+            key = curses.keyname(ch).decode("utf-8").lower()
+
+        if key == 'w':
+            elevation += MOVEMENT_STEP
+            cmd = f"1a{elevation:.2f}"
+        elif key == 's':
+            elevation -= MOVEMENT_STEP
+            cmd = f"1a{elevation:.2f}"
+        elif key == 'a':
+            azimuth -= MOVEMENT_STEP
+            cmd = f"2a{azimuth:.2f}"
+        elif key == 'd':
+            azimuth += MOVEMENT_STEP
+            cmd = f"2a{azimuth:.2f}"
+        elif key == 'z':
+            azimuth = elevation = 0.0
+            cmd = "zero"
+        elif key == ' ':
+            motor_enabled = not motor_enabled
+            cmd = "enable" if motor_enabled else "disable"
+        elif key == 'q':
+            running = False
+            break
+
+        if cmd:
+            cmd_history.append(cmd)
+            conn.sendall((cmd + "\n").encode())
+
+        if time.time() - last_draw >= DRAW_INTERVAL:
+            last_draw = time.time()
+            draw()
+
+    running = False
+
+
+def main(stdscr):
+    global running
+
+    init_ui(stdscr)
+
+    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    conn.settimeout(5.0)
+
+    for host in HOST_LIST:
+        try:
+            conn.connect((host, PORT))
+            break
+        except (socket.timeout, ConnectionRefusedError):
+            continue
+    
+    if not conn:
+        stdscr.addstr(0, 0, "Failed to connect to any host.")
+        stdscr.refresh()
+        time.sleep(2.0)
+        return
+
     threading.Thread(
         target=receive_data,
-        args=(uart,),
+        args=(conn,),
         daemon=True
     ).start()
 
-    # TCP server
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind((HOST, PORT))
-        s.listen()
-
-        print(f"[UART bridge server] listening on {PORT}")
-
-        while running:
-            conn, addr = s.accept()
-            threading.Thread(
-                target=handle_client,
-                args=(conn, addr, uart),
-                daemon=True
-            ).start()
+    try:
+        command_loop(conn)
+    finally:
+        running = False
+        conn.close()
 
 
 if __name__ == "__main__":
-    main()
+    curses.wrapper(main)

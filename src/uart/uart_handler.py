@@ -1,3 +1,4 @@
+from typing import Callable, Optional
 import pigpio
 import time
 
@@ -35,7 +36,6 @@ class UARTHandler:
         timeout = None  -> blocking
         """
         start = time.time()
-        buffer = ""
 
         while True:
             try:
@@ -56,6 +56,38 @@ class UARTHandler:
                 return None
 
             time.sleep(0.005)
+    
+
+    def listen(self, 
+           callback: Callable[[str], None], 
+           separator: Optional[str] ="\n", 
+           is_running: Optional[Callable[[], bool]] = lambda: True):
+        """
+        Continuously listen to UART input and call the callback function
+        when data is received. If separator is specified, the callback is called
+        only when the separator is found in the received data.
+        """
+        buffer = ""
+
+        while True:
+            if is_running and not is_running():
+                break
+            
+            chunk = self.read(timeout=0.05)
+            if not chunk:
+                continue
+
+            if separator is None:
+                callback(chunk.strip())
+                continue
+
+            buffer += chunk
+
+            while separator in buffer:
+                line, buffer = buffer.split(separator, 1)
+                line = line.strip()
+                if line:
+                    callback(line)
 
 
     def write(self, data: bytes):

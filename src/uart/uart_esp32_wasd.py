@@ -21,8 +21,8 @@ key = None
 azimuth = 0.0
 elevation = 0.0
 
-left_win = None
-right_win = None
+left_win: curses.window | None = None
+right_win: curses.window | None = None
 
 
 def init_ui(stdscr: curses.window):
@@ -52,6 +52,9 @@ def draw():
     global left_win, right_win
     global esp32_history, cmd_history
     global key, azimuth, elevation
+
+    if left_win is None or right_win is None:
+        return
 
     left_win.clear()
     h, w = left_win.getmaxyx()
@@ -96,27 +99,20 @@ def draw():
 def receive_data(uart: UARTHandler):
     global running
     global esp32_history
-    buffer = ""
-    
-    while running:
-        chunk = uart.read(timeout=0.05)
-        
-        if not chunk:
-            continue
 
-        buffer += chunk
-        
-        while '\n' in buffer:
-            line, buffer = buffer.split('\n', 1)
-            line = line.strip()
-            if line:
-                esp32_history.append(line)
+    def on_receive(line: str):
+        esp32_history.append(line)
+
+    uart.listen(on_receive)
 
 
 def command(uart: UARTHandler):
     global running
     global cmd_history, right_win
     global azimuth, elevation
+
+    if right_win is None:
+        return
 
     motor_enabled = False
     last_draw = time.time()

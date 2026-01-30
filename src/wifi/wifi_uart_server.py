@@ -1,86 +1,101 @@
 import socket
 import threading
+import signal
+
 from uart.uart_handler import UARTHandler
+import socket_utils
 
 HOST = "0.0.0.0"   # 모든 인터페이스
 PORT = 8000
 
 running = True
 esp32_history = []
+uart = None
+
 
 def receive_data(uart: UARTHandler):
     global running
-    buffer = ""
 
-    while running:
-        chunk = uart.read(timeout=0.05)
-        if not chunk:
-            continue
+    def on_receive(line: str):
+        esp32_history.append(line)
+        print(f"[ESP32] {line}")
 
-        buffer += chunk
+    uart.listen(on_receive, is_running=lambda: running)
 
-        while '\n' in buffer:
-            line, buffer = buffer.split('\n', 1)
-            line = line.strip()
-            if line:
-                esp32_history.append(line)
-                print(f"[ESP32] {line}")
+    print("[UART receiver stopped]")
 
 
-def handle_client(conn, addr, uart: UARTHandler):
+def handle_client(conn: socket.socket, addr, uart: UARTHandler):
+    global running
+
     print(f"[PC connected] {addr}")
+
+    def on_receive(line: str):
+        print(f"[PC] {line}")
+        uart.println(line)
+
     try:
-        with conn:
-            buffer = ""
-            while running:
-                data = conn.recv(1024)
-                if not data:
-                    break
+        socket_utils.listen(conn, on_receive, is_running=lambda: running)
+    finally:
+        print(f"[PC disconnected] {addr}")
+        conn.close()
 
-                buffer += data.decode()
 
-                while '\n' in buffer:
-                    cmd, buffer = buffer.split('\n', 1)
-                    cmd = cmd.strip()
-                    if cmd:
-                        print(f"[PC] {cmd}")
-                        uart.println(cmd)
+def shutdown(signum=None, frame=None):
+    global running, uart
+    print("\n[Shutdown] Cleaning up...")
 
-    except Exception as e:
-        print("Client error:", e)
+    running = False
 
-    print(f"[PC disconnected] {addr}")
+    if uart is not None:
+        try:
+            uart.destroy()
+            print("[Shutdown] UART destroyed")
+        except Exception as e:
+            print("[Shutdown] UART destroy failed:", e)
 
 
 def main():
-    try:
+    global uart 
+    
+    try: 
         uart = UARTHandler(tx=23, rx=24, baud=57600)
+        
+        signal.signal(signal.SIGINT, shutdown)   # Ctrl+C
+        signal.signal(signal.SIGTERM, shutdown)  # systemd / kill
+
+        # UART reciever thread
+        threading.Thread(
+            target=receive_data,
+            args=(uart,),
+            daemon=True
+        ).start()
+
+        # TCP server
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((HOST, PORT))
+            s.settimeout(0.5)
+            s.listen()
+
+            print(f"[UART bridge server] listening on {PORT}")
+
+            while running:
+                try:
+                    conn, addr = s.accept()
+                    threading.Thread(
+                        target=handle_client,
+                        args=(conn, addr, uart),
+                        daemon=True
+                    ).start()
+                except socket.timeout:
+                    continue
+
     except Exception as e:
-        print("UART init failed:", e)
-        return
+        print("Server error:", e)
 
-    # UART reciever thread
-    threading.Thread(
-        target=receive_data,
-        args=(uart,),
-        daemon=True
-    ).start()
-
-    # TCP server
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind((HOST, PORT))
-        s.listen()
-
-        print(f"[UART bridge server] listening on {PORT}")
-
-        while running:
-            conn, addr = s.accept()
-            threading.Thread(
-                target=handle_client,
-                args=(conn, addr, uart),
-                daemon=True
-            ).start()
+    finally:
+        shutdown()
 
 
 if __name__ == "__main__":
