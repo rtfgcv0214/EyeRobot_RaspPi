@@ -12,11 +12,12 @@ def listen(conn,
     """
     buffer = ""
 
-    while True:
-        if is_running and not is_running():
+    while is_running():
+        try:
+            data = conn.recv(1024)
+        except:
             break
 
-        data = conn.recv(1024)
         if not data:
             break  # connection closed
 
@@ -30,6 +31,5 @@ def listen(conn,
 
         while separator in buffer:
             line, buffer = buffer.split(separator, 1)
-            line = line.strip()
             if line:
                 callback(line)

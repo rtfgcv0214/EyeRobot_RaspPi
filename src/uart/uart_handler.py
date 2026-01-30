@@ -69,11 +69,13 @@ class UARTHandler:
         """
         buffer = ""
 
-        while True:
-            if is_running and not is_running():
+        while is_running():
+            
+            try:
+                chunk = self.read(timeout=0.05)
+            except Exception:
                 break
             
-            chunk = self.read(timeout=0.05)
             if not chunk:
                 continue
 
@@ -110,5 +112,17 @@ class UARTHandler:
 
 
     def destroy(self): 
-        self.pi.bb_serial_read_close(self.rx)
-        self.pi.stop()
+        if not self.pi:
+            return
+
+        try:
+            self.pi.bb_serial_read_close(self.rx)
+        except Exception:
+            pass
+
+        try:
+            self.pi.stop()
+        except Exception:
+            pass
+
+        self.pi = None
