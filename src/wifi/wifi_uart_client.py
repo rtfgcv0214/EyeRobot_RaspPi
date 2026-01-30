@@ -2,7 +2,7 @@ import socket
 import threading
 import signal
 import time
-from queue import Queue
+import queue
 
 from uart.uart_handler import UARTHandler
 import wifi.socket_utils as socket_utils
@@ -14,16 +14,27 @@ RECONNECT_INTERVAL = 5
 
 
 running = True
-uart_q = Queue()
-cmd_q = Queue()
+uart_q = queue.Queue(maxlen=100)
+cmd_q = queue.Queue(maxlen=50)
 uart = None
+
+
+def put_latest(q: queue.Queue, item):
+    try:
+        q.put_nowait(item)
+    except queue.Full:
+        try:
+            q.get_nowait()  # If full, discard last one
+            q.put_nowait(item)
+        except:
+            pass
 
 
 def receive_uart(uart: UARTHandler):
     global running
 
     def on_receive(line: str):
-        uart_q.put(line)
+        put_latest(uart_q, line)
         print("[recieve_uart]: ", line)
 
     uart.listen(on_receive, is_running=lambda: running)
@@ -52,7 +63,7 @@ def send_report(conn: socket.socket):
 
 def recieve_cmd(conn: socket.socket, addr):
     def on_receive(line: str):
-        cmd_q.put(line)
+        put_latest(cmd_q, line)
 
     socket_utils.listen(conn, on_receive, is_running=lambda: running)
 

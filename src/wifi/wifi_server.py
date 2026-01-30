@@ -113,21 +113,23 @@ def command_loop(conn: socket.socket):
         ch = right_win.getch()
         cmd = None
 
-        if ch != -1:
+        if ch == -1:
+            key = None
+        else:
             key = curses.keyname(ch).decode("utf-8").lower()
 
         if key == 'w':
             elevation += MOVEMENT_STEP
-            cmd = f"1a{elevation:.2f}"
+            cmd = f"2a{elevation:.2f}"
         elif key == 's':
             elevation -= MOVEMENT_STEP
-            cmd = f"1a{elevation:.2f}"
+            cmd = f"2a{elevation:.2f}"
         elif key == 'a':
             azimuth -= MOVEMENT_STEP
-            cmd = f"2a{azimuth:.2f}"
+            cmd = f"1a{azimuth:.2f}"
         elif key == 'd':
             azimuth += MOVEMENT_STEP
-            cmd = f"2a{azimuth:.2f}"
+            cmd = f"1a{azimuth:.2f}"
         elif key == 'z':
             azimuth = elevation = 0.0
             cmd = "zero"
