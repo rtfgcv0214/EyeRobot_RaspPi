@@ -6,7 +6,6 @@ import time
 import socket_utils
 
 
-HOST_LIST = ["172.20.10.6", "10.207.112.234"]   # Raspberry Pi IP
 PORT = 8000
 
 MOVEMENT_STEP = 0.02
@@ -150,38 +149,62 @@ def command_loop(conn: socket.socket):
     running = False
 
 
-def main(stdscr):
-    global running
+def main(stdscr: curses.window):
+    global running, esp32_history
+    global left_win, right_win
 
     init_ui(stdscr)
 
-    conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    conn.settimeout(5.0)
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("0.0.0.0", PORT))
+    server.listen(1)
+    server.settimeout(0.5)
 
-    for host in HOST_LIST:
+    esp32_history.append(f"Waiting for client on port {PORT}...")
+    server_start_time = time.time()
+
+
+    while running:
         try:
-            conn.connect((host, PORT))
-            break
-        except (socket.timeout, ConnectionRefusedError):
+            conn, addr = server.accept()
+            conn.settimeout(None)
+
+            esp32_history.append(f"[Connected] {addr}")
+
+            recv_thread = threading.Thread(
+                target=receive_data,
+                args=(conn,),
+                daemon=True
+            )
+            recv_thread.start()
+
+            try:
+                command_loop(conn)
+            except Exception as e:
+                esp32_history.append(f"[Error] {e}")
+            finally:
+                conn.close()
+                esp32_history = []
+                esp32_history.append("[Disconnected]")
+
+        except socket.timeout:
+            elapsed = time.time() - server_start_time
+            esp32_history = [
+                f"Waiting for client on port {PORT}...",
+                f"Time elapsed: {elapsed:.1f} seconds"
+            ]
+
+            ch = stdscr.getch()
+            if ch != -1:
+                key = curses.keyname(ch).decode("utf-8").lower()
+                if key == 'q':
+                    running = False
+
+            draw()
             continue
-    
-    if not conn:
-        stdscr.addstr(0, 0, "Failed to connect to any host.")
-        stdscr.refresh()
-        time.sleep(2.0)
-        return
 
-    threading.Thread(
-        target=receive_data,
-        args=(conn,),
-        daemon=True
-    ).start()
-
-    try:
-        command_loop(conn)
-    finally:
-        running = False
-        conn.close()
+    server.close()
 
 
 if __name__ == "__main__":
