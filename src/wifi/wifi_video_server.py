@@ -1,6 +1,6 @@
 import subprocess
 
-PC_IP = "10.207.112.114"   # PC의 Wi-Fi IP
+PC_IP = "192.168.0.99"   # PC의 Wi-Fi IP
 PORT = 8001
 
 cmd = [

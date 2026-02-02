@@ -8,7 +8,7 @@ from uart.uart_handler import UARTHandler
 import wifi.socket_utils as socket_utils
 
 # SERVER PC IP
-SERVER_HOST = "10.249.78.67"
+SERVER_HOST = "192.168.0.99"
 SERVER_PORT = 8000
 RECONNECT_INTERVAL = 5
 
@@ -106,7 +106,7 @@ def socket_client_loop():
 
     while running:
         try:
-            print("[Socket] Trying to connect...")
+            print(f"[Socket] Trying to connect {SERVER_HOST}:{SERVER_PORT}")
             conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             conn.settimeout(3)
             conn.connect((SERVER_HOST, SERVER_PORT))
