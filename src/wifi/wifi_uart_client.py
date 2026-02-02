@@ -14,8 +14,8 @@ RECONNECT_INTERVAL = 5
 
 
 running = True
-uart_q = queue.Queue(maxlen=100)
-cmd_q = queue.Queue(maxlen=50)
+uart_q = queue.Queue(maxsize=100)
+cmd_q = queue.Queue(maxsize=50)
 uart = None
 
 
@@ -102,6 +102,8 @@ def shutdown(signum=None, frame=None):
 def socket_client_loop():
     global running
 
+    conn = None
+
     while running:
         try:
             print("[Socket] Trying to connect...")
@@ -135,7 +137,8 @@ def socket_client_loop():
 
         finally:
             try:
-                conn.close()
+                if conn is not None: 
+                    conn.close()
             except:
                 pass
 

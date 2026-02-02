@@ -4,7 +4,7 @@ from typing import Callable, Optional
 def listen(conn, 
            callback: Callable[[str], None], 
            separator: Optional[str] ="\n", 
-           is_running: Optional[Callable[[], bool]] = lambda: True):
+           is_running: Callable[[], bool] = lambda: True):
     """
     Continuously listen to socket and call the callback function
     when data is received. If separator is specified, the callback is called

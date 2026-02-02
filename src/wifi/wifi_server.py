@@ -3,7 +3,7 @@ import threading
 import curses
 import time
 
-import socket_utils
+import wifi.socket_utils as socket_utils
 
 
 PORT = 8000
@@ -57,6 +57,7 @@ def draw():
         "A/D: Decrease/Increase Azimuth",
         "Z: Zero Azimuth/Elevation",
         "Space: Enable/Disable Motors",
+        "R: Reboot ESP32",
         "Q: Quit",
     ]
 
@@ -136,6 +137,8 @@ def command_loop(conn: socket.socket):
         elif key == ' ':
             motor_enabled = not motor_enabled
             cmd = "enable" if motor_enabled else "disable"
+        elif key == 'r':
+            cmd = "reboot"
         elif key == 'q':
             running = False
             break
