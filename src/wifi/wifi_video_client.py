@@ -16,15 +16,19 @@ cmd = [
 cmd = [
     "ffmpeg",
     "-f", "v4l2",
-    "-framerate", "10",
+    "-input_format", "mjpeg",
+    "-thread_queue_size", "1",
+
+    "-framerate", "20",
     "-video_size", "1280x720",
     "-i", "/dev/video0",
-    "-vcodec", "libx264",
-    "-preset", "ultrafast",
-    "-tune", "zerolatency",
-    "-pix_fmt", "yuv420p",
-    "-f", "mpegts",
-    f"udp://{PC_IP}:{PORT}"
+    
+    "-c:v", "mjpeg",
+    "-q:v", "5",
+    "-an",
+    "-f", "mjpeg",
+    f"udp://{PC_IP}:{PORT}?pkt_size=1400"
+
 ]
 
 print("Starting FFmpeg video sender...")
