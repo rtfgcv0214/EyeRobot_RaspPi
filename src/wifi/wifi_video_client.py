@@ -1,7 +1,12 @@
 import subprocess
+import argparse 
 
-PC_IP = "192.168.0.99"   # PC의 Wi-Fi IP
-PORT = 8001
+parser = argparse.ArgumentParser(description="WiFi Video Client using FFmpeg")
+parser.add_argument("-i", "--ip",   type=str, default="192.168.0.99", \
+                    help="IP address of the WiFi Video Server. seongho: 192.168.0.99, seohee: 192.168.0.171")
+parser.add_argument("-p", "--port", type=int, default=8001,         help="Port number of the WiFi Video Server")
+parser.add_argument("--fps",        type=int, default=20,           help="Frames per second for the video stream")
+parser.add_argument("--size",       type=str, default="1280x720",   help="Resolution for the video stream")
 
 """
 cmd = [
@@ -13,23 +18,29 @@ cmd = [
 ]
 """
 
-cmd = [
-    "ffmpeg",
-    "-f", "v4l2",
-    "-input_format", "mjpeg",
-    "-thread_queue_size", "1",
+def main():
+    args = parser.parse_args()
 
-    "-framerate", "20",
-    "-video_size", "1280x720",
-    "-i", "/dev/video0",
-    
-    "-c:v", "mjpeg",
-    "-q:v", "5",
-    "-an",
-    "-f", "mjpeg",
-    f"udp://{PC_IP}:{PORT}?pkt_size=1400"
+    cmd = [
+        "ffmpeg",
+        "-f", "v4l2",
+        "-input_format", "mjpeg",
+        "-thread_queue_size", "1",
 
-]
+        "-framerate", str(args.fps),
+        "-video_size", args.size,
+        "-i", "/dev/video0",
+        
+        "-c:v", "mjpeg",
+        "-q:v", "5",
+        "-an",
+        "-f", "mjpeg",
+        f"udp://{args.ip}:{args.port}?pkt_size=1400"
 
-print("Starting FFmpeg video sender...")
-subprocess.run(cmd)
+    ]
+
+    print("Starting FFmpeg video sender...")
+    subprocess.run(cmd)
+
+if __name__ == "__main__":
+    main()

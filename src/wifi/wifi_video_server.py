@@ -5,7 +5,7 @@ import argparse
 
 parser = argparse.ArgumentParser(description="WiFi Video Server using FFmpeg")
 parser.add_argument("-p", "--port", type=int, default=8001, help="Port to listen on for incoming video stream")
-parser.add_argument("-d", "--display", action="store_true", help="Display the video stream in a window")
+parser.add_argument("-d", "--display", action="store_true", default=True, help="Display the video stream in a window")
 parser.add_argument("-f", "--save_file", type=str, default="", help="File path to save the incoming video stream")
 
 
