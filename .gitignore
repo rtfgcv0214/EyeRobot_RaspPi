@@ -4,3 +4,8 @@ __pycache__/
 
 # vscode ssh tmp file
 .lgd-nfy0
+
+# video files
+*.avi
+*.mp4
+
