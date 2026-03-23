@@ -36,8 +36,8 @@ def main():
     save_path = args.save_file
 
     cap = cv2.VideoCapture(
-    f"udp://0.0.0.0:{port}?overrun_nonfatal=1&fifo_size=50000000",
-    cv2.CAP_FFMPEG
+        f"udp://0.0.0.0:{port}?overrun_nonfatal=1&fifo_size=5000&buffer_size=0",
+        cv2.CAP_FFMPEG
     )
 
     if not cap.isOpened():

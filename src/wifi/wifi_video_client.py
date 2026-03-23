@@ -25,17 +25,18 @@ def main():
         "ffmpeg",
         "-f", "v4l2",
         "-input_format", "mjpeg",
-        "-thread_queue_size", "1",
-
         "-framerate", str(args.fps),
         "-video_size", args.size,
         "-i", "/dev/video0",
+
+        "-fflags", "nobuffer",
+        "-flags", "low_delay",
+        "-probesize", "32",
+        "-analyzeduration", "0",
         
-        "-c:v", "mjpeg",
-        "-q:v", "5",
-        "-an",
+        "-c:v", "copy",
         "-f", "mjpeg",
-        f"udp://{args.ip}:{args.port}?pkt_size=1400"
+        f"udp://{args.ip}:{args.port}?pkt_size=1316"
 
     ]
 
